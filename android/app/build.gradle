@@ -1,0 +1,54 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'com.iknalos.livetranscribe'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.iknalos.livetranscribe"
+        minSdk 31          // on-device SpeechRecognizer is API 31+
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+
+    def ksFile = file('livetranscribe.keystore')
+
+    signingConfigs {
+        shared {
+            if (ksFile.exists()) {
+                storeFile ksFile
+                storePassword 'livetranscribe'
+                keyAlias 'livetranscribe'
+                keyPassword 'livetranscribe'
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            if (ksFile.exists()) signingConfig signingConfigs.shared
+        }
+        release {
+            minifyEnabled false
+            if (ksFile.exists()) signingConfig signingConfigs.shared
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core-ktx:1.13.1'
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'com.google.android.material:material:1.12.0'
+}

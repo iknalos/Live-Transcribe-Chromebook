@@ -1,0 +1,66 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    working-directory: android
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.7'
+
+      # Generate a stable signing key once and commit it, so every build is
+      # signed identically and the app updates in place (no uninstall needed).
+      - name: Ensure persistent signing keystore
+        run: |
+          if [ ! -f app/livetranscribe.keystore ]; then
+            keytool -genkeypair -v -keystore app/livetranscribe.keystore \
+              -storepass livetranscribe -keypass livetranscribe -alias livetranscribe \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=LiveTranscribe"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add -f app/livetranscribe.keystore
+            git commit -m "Add persistent signing keystore [skip ci]"
+            git push origin HEAD:${{ github.ref_name }}
+          fi
+
+      - name: Build debug APK
+        run: gradle assembleDebug --no-daemon
+
+      - name: Rename APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk ../LiveTranscribe.apk
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LiveTranscribe-apk
+          path: LiveTranscribe.apk
+
+      - name: Create release with APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: Live Transcribe v1.0.${{ github.run_number }}
+          files: LiveTranscribe.apk

@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Live Transcribe</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+  <meta name="theme-color" content="#1565C0" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <div class="row">
+      <button id="startBtn" class="ctrl">●&nbsp;Start</button>
+      <button id="pauseBtn" class="ctrl" disabled>❚❚&nbsp;Pause</button>
+      <button id="clearBtn" class="ctrl">Clear</button>
+      <button id="saveBtn" class="ctrl">Save…</button>
+    </div>
+
+    <div class="hint">Tag who is speaking (keys 0–4):</div>
+    <div id="speakerRow" class="row speakers"></div>
+
+    <div id="banner" class="banner">Idle — press Start to begin</div>
+    <div id="preview" class="preview"></div>
+
+    <div id="transcript" class="transcript"></div>
+
+    <div id="footer" class="footer">
+      Heads up: Chrome's speech recognition sends audio to Google — this web
+      version is <b>not</b> offline. For on-device transcription, use the Android app.
+    </div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
