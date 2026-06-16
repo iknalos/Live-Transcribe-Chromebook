@@ -26,6 +26,13 @@ speech recognizer — so after the English language pack downloads once, transcr
 stays on the device (no audio leaves it). This is the closest match to the offline
 desktop tool.
 
+**On-device only — no silent cloud fallback.** The app uses *only* the offline
+engine. If your Chromebook doesn't have offline English installed, it refuses to
+run and points you to Settings instead of quietly streaming audio to Google. The
+APK is small (~11 MB) because it bundles no speech model — the offline model is
+provided by Android itself and downloaded separately via Settings. To prove it's
+local, turn on airplane mode and confirm transcription still works.
+
 ### Install the prebuilt APK
 1. Every push to `main` builds a signed APK via GitHub Actions and attaches it to a
    **Release**. Grab the latest from the [Releases page](../../releases).
