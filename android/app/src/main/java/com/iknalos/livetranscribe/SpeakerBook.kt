@@ -86,8 +86,9 @@ class SpeakerBook(var threshold: Float = 0.55f) {
 
     private fun mean(vs: List<FloatArray>): FloatArray {
         val out = FloatArray(vs[0].size)
-        for (v in vs) for (i in out.indices) out[i] += v[i]
-        for (i in out.indices) out[i] /= vs.size
+        for (v in vs) for (i in out.indices) out[i] = out[i] + v[i]
+        val k = vs.size.toFloat()
+        for (i in out.indices) out[i] = out[i] / k
         return out
     }
 }
