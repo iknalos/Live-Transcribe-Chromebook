@@ -32,6 +32,9 @@ let recognition = null;
 let running = false;
 let paused = false;
 let currentSpeaker = 0;
+// speaker that owns the chunk being recorded right now (captured when the
+// recognition session starts, so a late switch doesn't mis-tag it)
+let utteranceSpeaker = 0;
 // paragraphs: { speaker, text, time }
 const paras = [];
 
@@ -47,6 +50,7 @@ SPK_NAMES.forEach((name, i) => {
 });
 
 function setSpeaker(i) {
+  const changed = i !== currentSpeaker;
   currentSpeaker = i;
   spkButtons.forEach((b, idx) => {
     if (idx === i) {
@@ -57,6 +61,11 @@ function setSpeaker(i) {
       b.style.background = "";
     }
   });
+  // Pressing a speaker button is a hard boundary: finalize what's been said so
+  // far to the previous speaker, then restart fresh for the new one (onend).
+  if (changed && running && !paused && recognition) {
+    try { recognition.stop(); } catch (_) {}
+  }
 }
 setSpeaker(0);
 
@@ -77,7 +86,10 @@ function getRecognition() {
   r.continuous = true;
   r.interimResults = true;
   r.maxAlternatives = 1;
-  r.onstart = () => { if (!paused) setState("listening"); };
+  r.onstart = () => {
+    utteranceSpeaker = currentSpeaker;  // this session's audio belongs to the current selection
+    if (!paused) setState("listening");
+  };
   r.onspeechstart = () => setState("hearing");
   r.onresult = onResult;
   r.onerror = (e) => {
@@ -102,7 +114,7 @@ function onResult(event) {
     const res = event.results[i];
     const txt = res[0].transcript;
     if (res.isFinal) {
-      appendFinal(currentSpeaker, txt);
+      appendFinal(utteranceSpeaker, txt);
     } else {
       interim += txt;
     }
