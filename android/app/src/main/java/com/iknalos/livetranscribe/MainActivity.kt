@@ -12,6 +12,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
+import android.provider.Settings
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -81,7 +82,6 @@ class MainActivity : AppCompatActivity() {
     private var recognizer: SpeechRecognizer? = null
     private var running = false
     private var paused = false
-    private var onDevice = false
     private var currentSpeaker = 0
     // speaker that owns the chunk being recorded right now (captured when it
     // started, so finishing late doesn't mis-tag it to a later selection)
@@ -177,8 +177,12 @@ class MainActivity : AppCompatActivity() {
             micPermLauncher.launch(Manifest.permission.RECORD_AUDIO)
             return
         }
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            toast("No speech recognition service is available on this device.")
+        // On-device ONLY: never silently stream audio to the cloud. If the
+        // offline engine isn't installed, refuse to run and explain how to get it.
+        if (!onDeviceAvailable()) {
+            setState("idle")
+            footer.text = "On-device English not available — install it in Settings"
+            showOnDeviceUnavailableDialog()
             return
         }
         running = true
@@ -186,25 +190,36 @@ class MainActivity : AppCompatActivity() {
         btnStart.text = "■ Stop"
         btnPause.isEnabled = true
         btnPause.text = "❚❚ Pause"
-        recognizer = createRecognizer().also { it.setRecognitionListener(listener) }
-        footer.text = if (onDevice)
-            "On-device recognition — audio stays on this device"
-        else
-            "Using the system recognizer (may use the network)"
+        recognizer = SpeechRecognizer.createOnDeviceSpeechRecognizer(this)
+            .also { it.setRecognitionListener(listener) }
+        footer.text = "On-device recognition — audio stays on this device"
         setState("loading")
         listenAgain()
     }
 
-    private fun createRecognizer(): SpeechRecognizer {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+    private fun onDeviceAvailable(): Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             SpeechRecognizer.isOnDeviceRecognitionAvailable(this)
-        ) {
-            onDevice = true
-            SpeechRecognizer.createOnDeviceSpeechRecognizer(this)
-        } else {
-            onDevice = false
-            SpeechRecognizer.createSpeechRecognizer(this)
-        }
+
+    private fun showOnDeviceUnavailableDialog() {
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Offline recognition not available")
+            .setMessage(
+                "This app only transcribes on-device, so your audio never leaves " +
+                "this Chromebook. Right now no offline English speech engine is " +
+                "installed.\n\nInstall \"English (US)\" on-device / offline speech " +
+                "recognition in your Voice input or Languages settings, then press " +
+                "Start again."
+            )
+            .setPositiveButton("Open settings") { _, _ ->
+                try {
+                    startActivity(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS))
+                } catch (_: Exception) {
+                    try { startActivity(Intent(Settings.ACTION_SETTINGS)) } catch (_: Exception) {}
+                }
+            }
+            .setNegativeButton("Close", null)
+            .show()
     }
 
     private fun recognizerIntent() =
