@@ -83,6 +83,11 @@ class MainActivity : AppCompatActivity() {
     private var paused = false
     private var onDevice = false
     private var currentSpeaker = 0
+    // speaker that owns the chunk being recorded right now (captured when it
+    // started, so finishing late doesn't mis-tag it to a later selection)
+    private var utteranceSpeaker = 0
+    private var hasPendingSpeech = false   // have we heard any speech this chunk?
+    private var lastPartial = ""           // newest interim text (rescued on errors)
     private val handler = Handler(Looper.getMainLooper())
 
     private val micPermLauncher = registerForActivityResult(
@@ -133,8 +138,20 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setSpeaker(i: Int) {
+        val changed = i != currentSpeaker
         currentSpeaker = i
         highlightSpeaker()
+        if (changed && running && !paused) {
+            if (hasPendingSpeech) {
+                // Words spoken up to now belong to the PREVIOUS speaker: finalize
+                // the current chunk (commits captured audio), then onResults will
+                // restart a fresh chunk tagged to the new speaker.
+                try { recognizer?.stopListening() } catch (_: Exception) {}
+            } else {
+                // Nothing said yet this chunk — just retag it to the new speaker.
+                utteranceSpeaker = i
+            }
+        }
     }
 
     private fun highlightSpeaker() {
@@ -202,6 +219,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun listenAgain() {
         if (!running || paused) return
+        // a fresh chunk belongs to whoever is selected as it starts
+        utteranceSpeaker = currentSpeaker
+        hasPendingSpeech = false
+        lastPartial = ""
         try {
             recognizer?.startListening(recognizerIntent())
         } catch (e: Exception) {
@@ -244,20 +265,26 @@ class MainActivity : AppCompatActivity() {
     // ---- recognition callbacks ----
     private val listener = object : RecognitionListener {
         override fun onReadyForSpeech(params: Bundle?) { if (!paused) setState("listening") }
-        override fun onBeginningOfSpeech() { setState("hearing") }
+        override fun onBeginningOfSpeech() { hasPendingSpeech = true; setState("hearing") }
         override fun onRmsChanged(rmsdB: Float) {}
         override fun onBufferReceived(buffer: ByteArray?) {}
         override fun onEndOfSpeech() { setState("transcribing") }
         override fun onEvent(eventType: Int, params: Bundle?) {}
 
         override fun onPartialResults(partialResults: Bundle?) {
-            firstResult(partialResults)?.let { preview.text = it }
+            firstResult(partialResults)?.let {
+                if (it.isNotBlank()) { lastPartial = it; hasPendingSpeech = true }
+                preview.text = it
+            }
         }
 
         override fun onResults(results: Bundle?) {
             val txt = firstResult(results)
             preview.text = ""
-            if (!txt.isNullOrBlank()) appendFinal(currentSpeaker, txt)
+            // tag with the speaker who owned this chunk, not the current selection
+            if (!txt.isNullOrBlank()) appendFinal(utteranceSpeaker, txt)
+            hasPendingSpeech = false
+            lastPartial = ""
             if (running && !paused) {
                 setState("listening")
                 listenAgain()
@@ -266,8 +293,15 @@ class MainActivity : AppCompatActivity() {
 
         override fun onError(error: Int) {
             preview.text = ""
+            // If we had speech this chunk but got no final (e.g. NO_MATCH after a
+            // forced stop), rescue the last interim so nothing is lost.
+            if (hasPendingSpeech && lastPartial.isNotBlank()) {
+                appendFinal(utteranceSpeaker, lastPartial)
+            }
+            hasPendingSpeech = false
+            lastPartial = ""
             // No-match / timeout / busy are normal during continuous listening:
-            // just arm the next utterance.
+            // just arm the next chunk.
             if (running && !paused) {
                 val delay = if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) 400L else 150L
                 handler.postDelayed({ listenAgain() }, delay)
