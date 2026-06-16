@@ -6,3 +6,8 @@ android/local.properties
 .idea/
 *.iml
 .DS_Store
+
+# sherpa-onnx engine bits fetched by CI (not committed; see build.yml)
+android/app/src/main/jniLibs/
+android/app/src/main/assets/
+android/app/src/main/java/com/k2fsa/

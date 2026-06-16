@@ -26,6 +26,18 @@ speech recognizer — so after the English language pack downloads once, transcr
 stays on the device (no audio leaves it). This is the closest match to the offline
 desktop tool.
 
+**Two modes (both 100% offline):**
+- **Manual** — Android's on-device recognizer; tap who's speaking (keys 0–4).
+  Proven and reliable for one mic passed around.
+- **Auto (beta)** — a bundled sherpa-onnx engine captures the mic, transcribes
+  with offline Whisper, and **labels speakers by voiceprint live**. It
+  auto-discovers "Speaker 1/2/…" as new voices appear, and the **Enroll** button
+  lets you register a named voice for better accuracy. The speaker buttons act as
+  a correction in Auto mode. Experimental — accuracy on a shared mic varies and
+  the match threshold may need tuning. This is why the APK is large (it bundles
+  the offline speech + speaker models). See
+  [`docs/AUTO_SPEAKER_ROADMAP.md`](docs/AUTO_SPEAKER_ROADMAP.md).
+
 **On-device only — no silent cloud fallback.** The app uses *only* the offline
 engine. If your device doesn't have offline English installed, it refuses to run
 and points you to Settings instead of quietly streaming audio to Google. The APK

@@ -23,11 +23,13 @@ import android.text.style.StyleSpan
 import android.view.KeyEvent
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import java.text.SimpleDateFormat
@@ -35,15 +37,16 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Live Transcribe — real-time, speaker-tagged English transcription for
- * Chromebooks / Android. Mirrors the desktop tool: tap who is about to speak
- * (buttons or number keys 0–4) as you hand the mic over; consecutive speech
- * from the same speaker merges into one paragraph, a speaker change starts a
- * new one. Pause/Resume mutes without tearing down the recognizer.
+ * Live Transcribe — real-time, speaker-tagged English transcription, fully offline.
  *
- * Engine: Android's on-device SpeechRecognizer where available (API 33+),
- * otherwise the system recognizer with EXTRA_PREFER_OFFLINE. On-device keeps
- * audio on the device once the English language pack is installed.
+ * Two modes:
+ *  • Manual — Android's on-device SpeechRecognizer; tap who is about to speak
+ *    (buttons or keys 0–4). Proven, reliable for one mic passed around.
+ *  • Auto (beta) — [SherpaEngine]: captures the mic itself, transcribes with
+ *    offline Whisper, and labels speakers by voiceprint live. Enroll button lets
+ *    a voice be registered with a name. Experimental; tune on-device.
+ *
+ * Both run 100% on-device. The app has no network permission at all.
  */
 class MainActivity : AppCompatActivity() {
 
@@ -52,11 +55,15 @@ class MainActivity : AppCompatActivity() {
         0xFF444444.toInt(), 0xFF1565C0.toInt(), 0xFF2E7D32.toInt(),
         0xFFC62828.toInt(), 0xFF6A1B9A.toInt()
     )
+    // colors for auto-discovered / enrolled speakers, indexed by speaker id
+    private val autoPalette = intArrayOf(
+        0xFF1565C0.toInt(), 0xFF2E7D32.toInt(), 0xFFC62828.toInt(), 0xFF6A1B9A.toInt(),
+        0xFF00838F.toInt(), 0xFFEF6C00.toInt(), 0xFF4527A0.toInt(), 0xFF558B2F.toInt(),
+    )
 
-    // banner state -> (background, foreground, caption)
     private val states = mapOf(
         "idle" to Triple(0xFFE0E0E0.toInt(), 0xFF444444.toInt(), "Idle — press Start to begin"),
-        "loading" to Triple(0xFFFFE0B2.toInt(), 0xFF7A4F01.toInt(), "Loading recognizer…"),
+        "loading" to Triple(0xFFFFE0B2.toInt(), 0xFF7A4F01.toInt(), "Loading…  (first time is slow)"),
         "listening" to Triple(0xFFC8E6C9.toInt(), 0xFF1B5E20.toInt(), "●  LISTENING — speak anytime"),
         "hearing" to Triple(0xFFFFCDD2.toInt(), 0xFFB71C1C.toInt(), "●  HEARING YOU…"),
         "transcribing" to Triple(0xFFFFE0B2.toInt(), 0xFF7A4F01.toInt(), "Transcribing…"),
@@ -64,13 +71,18 @@ class MainActivity : AppCompatActivity() {
         "stopped" to Triple(0xFFE0E0E0.toInt(), 0xFF444444.toInt(), "Stopped — press Start to resume"),
     )
 
-    private data class Para(val speaker: Int, var text: String, val time: String)
+    // key merges consecutive same-speaker paragraphs; label/color drive rendering
+    private data class Para(val key: String, val label: String, val color: Int,
+                            var text: String, val time: String)
     private val paras = ArrayList<Para>()
 
     private lateinit var btnStart: Button
     private lateinit var btnPause: Button
     private lateinit var btnClear: Button
     private lateinit var btnSave: Button
+    private lateinit var btnModeManual: Button
+    private lateinit var btnModeAuto: Button
+    private lateinit var btnEnroll: Button
     private lateinit var speakerRow: LinearLayout
     private lateinit var banner: TextView
     private lateinit var preview: TextView
@@ -79,15 +91,16 @@ class MainActivity : AppCompatActivity() {
     private lateinit var footer: TextView
     private val spkButtons = ArrayList<Button>()
 
+    private var autoMode = false
+    private var engine: SherpaEngine? = null
+
     private var recognizer: SpeechRecognizer? = null
     private var running = false
     private var paused = false
     private var currentSpeaker = 0
-    // speaker that owns the chunk being recorded right now (captured when it
-    // started, so finishing late doesn't mis-tag it to a later selection)
-    private var utteranceSpeaker = 0
-    private var hasPendingSpeech = false   // have we heard any speech this chunk?
-    private var lastPartial = ""           // newest interim text (rescued on errors)
+    private var utteranceSpeaker = 0       // speaker who owned the chunk being recorded
+    private var hasPendingSpeech = false
+    private var lastPartial = ""
     private val handler = Handler(Looper.getMainLooper())
 
     private val micPermLauncher = registerForActivityResult(
@@ -102,6 +115,9 @@ class MainActivity : AppCompatActivity() {
         btnPause = findViewById(R.id.btnPause)
         btnClear = findViewById(R.id.btnClear)
         btnSave = findViewById(R.id.btnSave)
+        btnModeManual = findViewById(R.id.btnModeManual)
+        btnModeAuto = findViewById(R.id.btnModeAuto)
+        btnEnroll = findViewById(R.id.btnEnroll)
         speakerRow = findViewById(R.id.speakerRow)
         banner = findViewById(R.id.banner)
         preview = findViewById(R.id.preview)
@@ -113,12 +129,35 @@ class MainActivity : AppCompatActivity() {
         btnPause.setOnClickListener { togglePause() }
         btnClear.setOnClickListener { clear() }
         btnSave.setOnClickListener { save() }
+        btnModeManual.setOnClickListener { setMode(false) }
+        btnModeAuto.setOnClickListener { setMode(true) }
+        btnEnroll.setOnClickListener { promptEnroll() }
 
         buildSpeakerButtons()
+        setMode(false)
         setState("idle")
     }
 
-    // ---- speaker selection ----
+    // ---- mode ----
+    private fun setMode(auto: Boolean) {
+        if (running) { toast("Stop before switching mode."); return }
+        autoMode = auto
+        btnEnroll.isEnabled = false
+        btnPause.isEnabled = false
+        footer.text = if (auto)
+            "Auto (offline, beta) — detects speakers by voice"
+        else
+            "Manual (offline) — tap who is speaking"
+        fun tint(b: Button, on: Boolean) {
+            b.backgroundTintList = ColorStateList.valueOf(
+                if (on) 0xFF1565C0.toInt() else 0xFFE0E0E0.toInt())
+            b.setTextColor(if (on) Color.WHITE else 0xFF333333.toInt())
+        }
+        tint(btnModeManual, !auto)
+        tint(btnModeAuto, auto)
+    }
+
+    // ---- speaker selection / correction ----
     private fun buildSpeakerButtons() {
         for (i in spkNames.indices) {
             val b = Button(this).apply {
@@ -138,20 +177,30 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setSpeaker(i: Int) {
+        if (autoMode) {
+            currentSpeaker = i
+            highlightSpeaker()
+            if (running) relabelLast(i)   // buttons act as a correction in Auto mode
+            return
+        }
         val changed = i != currentSpeaker
         currentSpeaker = i
         highlightSpeaker()
         if (changed && running && !paused) {
             if (hasPendingSpeech) {
-                // Words spoken up to now belong to the PREVIOUS speaker: finalize
-                // the current chunk (commits captured audio), then onResults will
-                // restart a fresh chunk tagged to the new speaker.
                 try { recognizer?.stopListening() } catch (_: Exception) {}
             } else {
-                // Nothing said yet this chunk — just retag it to the new speaker.
                 utteranceSpeaker = i
             }
         }
+    }
+
+    /** Auto mode: reassign the most recent paragraph to a manual speaker. */
+    private fun relabelLast(i: Int) {
+        val idx = paras.lastIndex
+        if (idx < 0) return
+        paras[idx] = paras[idx].copy(key = "m$i", label = spkNames[i], color = spkColors[i])
+        renderTranscript()
     }
 
     private fun highlightSpeaker() {
@@ -177,8 +226,80 @@ class MainActivity : AppCompatActivity() {
             micPermLauncher.launch(Manifest.permission.RECORD_AUDIO)
             return
         }
-        // On-device ONLY: never silently stream audio to the cloud. If the
-        // offline engine isn't installed, refuse to run and explain how to get it.
+        if (autoMode) startAuto() else startManual()
+    }
+
+    private fun stop() {
+        running = false
+        paused = false
+        val e = engine
+        engine = null
+        if (e != null) Thread { e.stop() }.start()   // join off the UI thread
+        recognizer?.let {
+            try { it.stopListening() } catch (_: Exception) {}
+            try { it.cancel() } catch (_: Exception) {}
+            try { it.destroy() } catch (_: Exception) {}
+        }
+        recognizer = null
+        btnStart.text = "● Start"
+        btnPause.isEnabled = false
+        btnEnroll.isEnabled = false
+        btnModeManual.isEnabled = true
+        btnModeAuto.isEnabled = true
+        preview.text = ""
+        setState("stopped")
+    }
+
+    // ---- Auto (sherpa-onnx, offline voiceprint) ----
+    private fun startAuto() {
+        running = true
+        btnStart.text = "■ Stop"
+        btnPause.isEnabled = false
+        btnEnroll.isEnabled = true
+        btnModeManual.isEnabled = false
+        btnModeAuto.isEnabled = false
+        footer.text = "Auto (offline) — detecting speakers by voice"
+        setState("loading")
+        val eng = SherpaEngine(this)
+        engine = eng
+        eng.start(object : SherpaEngine.Listener {
+            override fun onText(text: String, speaker: SpeakerBook.Speaker) = runOnUiThread {
+                appendFinal("a${speaker.id}", speaker.name, colorForId(speaker.id), text)
+            }
+            override fun onEnrolled(speaker: SpeakerBook.Speaker) = runOnUiThread {
+                toast("Enrolled ${speaker.name}")
+            }
+            override fun onState(listening: Boolean) = runOnUiThread {
+                if (running) setState(if (listening) "listening" else "loading")
+            }
+            override fun onError(msg: String) = runOnUiThread {
+                toast(msg)
+                stop()
+            }
+        })
+    }
+
+    private fun promptEnroll() {
+        if (engine == null) { toast("Start Auto first, then enroll."); return }
+        val input = EditText(this).apply { hint = "Name (e.g. Alex)" }
+        AlertDialog.Builder(this)
+            .setTitle("Enroll a voice")
+            .setMessage("Type a name, tap OK, then have that person say a full sentence.")
+            .setView(input)
+            .setPositiveButton("OK") { _, _ ->
+                val name = input.text.toString().trim().ifEmpty { "Speaker" }
+                engine?.enrollNextUtterance(name)
+                toast("Now have $name speak a sentence…")
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun colorForId(id: Int): Int =
+        if (id <= 0) 0xFF757575.toInt() else autoPalette[(id - 1) % autoPalette.size]
+
+    // ---- Manual (Android on-device recognizer) ----
+    private fun startManual() {
         if (!onDeviceAvailable()) {
             setState("idle")
             footer.text = "On-device English not available — install it in Settings"
@@ -190,9 +311,11 @@ class MainActivity : AppCompatActivity() {
         btnStart.text = "■ Stop"
         btnPause.isEnabled = true
         btnPause.text = "❚❚ Pause"
+        btnModeManual.isEnabled = false
+        btnModeAuto.isEnabled = false
         recognizer = SpeechRecognizer.createOnDeviceSpeechRecognizer(this)
             .also { it.setRecognitionListener(listener) }
-        footer.text = "On-device recognition — audio stays on this device"
+        footer.text = "Manual (offline) — audio stays on this device"
         setState("loading")
         listenAgain()
     }
@@ -202,14 +325,14 @@ class MainActivity : AppCompatActivity() {
             SpeechRecognizer.isOnDeviceRecognitionAvailable(this)
 
     private fun showOnDeviceUnavailableDialog() {
-        androidx.appcompat.app.AlertDialog.Builder(this)
+        AlertDialog.Builder(this)
             .setTitle("Offline recognition not available")
             .setMessage(
-                "This app only transcribes on-device, so your audio never leaves " +
-                "this Chromebook. Right now no offline English speech engine is " +
-                "installed.\n\nInstall \"English (US)\" on-device / offline speech " +
-                "recognition in your Voice input or Languages settings, then press " +
-                "Start again."
+                "Manual mode uses Android's offline recognizer, so your audio never " +
+                "leaves this device. Right now no offline English engine is installed.\n\n" +
+                "Install \"English (US)\" on-device speech in Voice input / Languages " +
+                "settings, then press Start — or use Auto (beta), which bundles its own " +
+                "offline engine."
             )
             .setPositiveButton("Open settings") { _, _ ->
                 try {
@@ -234,7 +357,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun listenAgain() {
         if (!running || paused) return
-        // a fresh chunk belongs to whoever is selected as it starts
         utteranceSpeaker = currentSpeaker
         hasPendingSpeech = false
         lastPartial = ""
@@ -245,24 +367,8 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun stop() {
-        running = false
-        paused = false
-        recognizer?.let {
-            try { it.stopListening() } catch (_: Exception) {}
-            try { it.cancel() } catch (_: Exception) {}
-            try { it.destroy() } catch (_: Exception) {}
-        }
-        recognizer = null
-        btnStart.text = "● Start"
-        btnPause.isEnabled = false
-        btnPause.text = "❚❚ Pause"
-        preview.text = ""
-        setState("stopped")
-    }
-
     private fun togglePause() {
-        if (!running) return
+        if (!running || autoMode) return
         if (!paused) {
             paused = true
             try { recognizer?.cancel() } catch (_: Exception) {}
@@ -277,7 +383,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ---- recognition callbacks ----
     private val listener = object : RecognitionListener {
         override fun onReadyForSpeech(params: Bundle?) { if (!paused) setState("listening") }
         override fun onBeginningOfSpeech() { hasPendingSpeech = true; setState("hearing") }
@@ -296,8 +401,7 @@ class MainActivity : AppCompatActivity() {
         override fun onResults(results: Bundle?) {
             val txt = firstResult(results)
             preview.text = ""
-            // tag with the speaker who owned this chunk, not the current selection
-            if (!txt.isNullOrBlank()) appendFinal(utteranceSpeaker, txt)
+            if (!txt.isNullOrBlank()) appendManual(utteranceSpeaker, txt)
             hasPendingSpeech = false
             lastPartial = ""
             if (running && !paused) {
@@ -308,15 +412,11 @@ class MainActivity : AppCompatActivity() {
 
         override fun onError(error: Int) {
             preview.text = ""
-            // If we had speech this chunk but got no final (e.g. NO_MATCH after a
-            // forced stop), rescue the last interim so nothing is lost.
             if (hasPendingSpeech && lastPartial.isNotBlank()) {
-                appendFinal(utteranceSpeaker, lastPartial)
+                appendManual(utteranceSpeaker, lastPartial)
             }
             hasPendingSpeech = false
             lastPartial = ""
-            // No-match / timeout / busy are normal during continuous listening:
-            // just arm the next chunk.
             if (running && !paused) {
                 val delay = if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) 400L else 150L
                 handler.postDelayed({ listenAgain() }, delay)
@@ -328,14 +428,17 @@ class MainActivity : AppCompatActivity() {
         b?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
 
     // ---- transcript model ----
-    private fun appendFinal(spk: Int, raw: String) {
+    private fun appendManual(spk: Int, raw: String) =
+        appendFinal("m$spk", spkNames[spk], spkColors[spk], raw)
+
+    private fun appendFinal(key: String, label: String, color: Int, raw: String) {
         val line = raw.trim()
         if (line.isEmpty()) return
         val last = paras.lastOrNull()
-        if (last != null && last.speaker == spk) {
+        if (last != null && last.key == key) {
             last.text += " " + line
         } else {
-            paras.add(Para(spk, line, timeNow()))
+            paras.add(Para(key, label, color, line, timeNow()))
         }
         renderTranscript()
     }
@@ -349,8 +452,8 @@ class MainActivity : AppCompatActivity() {
             sb.setSpan(ForegroundColorSpan(0xFF999999.toInt()), tsStart, sb.length,
                 Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             val nameStart = sb.length
-            sb.append("${spkNames[p.speaker]}: ")
-            sb.setSpan(ForegroundColorSpan(spkColors[p.speaker]), nameStart, sb.length,
+            sb.append("${p.label}: ")
+            sb.setSpan(ForegroundColorSpan(p.color), nameStart, sb.length,
                 Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             sb.setSpan(StyleSpan(Typeface.BOLD), nameStart, sb.length,
                 Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
@@ -389,7 +492,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ---- hardware-keyboard shortcuts (Chromebook) ----
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         when (keyCode) {
             KeyEvent.KEYCODE_0, KeyEvent.KEYCODE_NUMPAD_0 -> { setSpeaker(0); return true }
@@ -416,6 +518,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         running = false
+        engine?.let { e -> Thread { e.stop() }.start() }
+        engine = null
         recognizer?.let { try { it.destroy() } catch (_: Exception) {} }
         recognizer = null
         super.onDestroy()

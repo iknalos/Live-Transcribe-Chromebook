@@ -46,6 +46,48 @@ jobs:
             git push origin HEAD:${{ github.ref_name }}
           fi
 
+      # Auto mode's offline engine (sherpa-onnx). Fetched at build time so the
+      # repo stays lean; .gitignore excludes these paths. Libs + Kotlin API are
+      # pinned to the same release; models come from stable model tags.
+      - name: Fetch sherpa-onnx libs, Kotlin API and models
+        run: |
+          set -euo pipefail
+          API=https://api.github.com/repos/k2-fsa/sherpa-onnx
+          DL=https://github.com/k2-fsa/sherpa-onnx/releases/download
+          TAG=$(curl -fsSL $API/releases/latest | jq -r .tag_name)
+          echo "Using sherpa-onnx $TAG"
+
+          # 1) native libs (arm64-v8a)
+          AAR_URL=$(curl -fsSL $API/releases/tags/$TAG \
+            | jq -r '.assets[] | select(.name|test("android.*\\.tar\\.bz2$")) | .browser_download_url' | head -1)
+          echo "libs: $AAR_URL"
+          curl -fL -o sherpa-android.tar.bz2 "$AAR_URL"
+          mkdir -p tmp_libs app/src/main/jniLibs/arm64-v8a
+          tar xf sherpa-android.tar.bz2 -C tmp_libs
+          find tmp_libs -path '*arm64-v8a*' -name '*.so' -exec cp {} app/src/main/jniLibs/arm64-v8a/ \;
+          ls -la app/src/main/jniLibs/arm64-v8a/
+
+          # 2) Kotlin API at the same tag
+          mkdir -p app/src/main/java/com/k2fsa/sherpa/onnx
+          for f in $(curl -fsSL "$API/contents/sherpa-onnx/kotlin-api?ref=$TAG" \
+              | jq -r '.[] | select(.name|endswith(".kt")) | .name'); do
+            curl -fL -o "app/src/main/java/com/k2fsa/sherpa/onnx/$f" \
+              "https://raw.githubusercontent.com/k2-fsa/sherpa-onnx/$TAG/sherpa-onnx/kotlin-api/$f"
+          done
+          ls app/src/main/java/com/k2fsa/sherpa/onnx/
+
+          # 3) offline models into assets
+          A=app/src/main/assets
+          mkdir -p "$A"
+          curl -fL -o "$A/silero_vad.onnx" "$DL/asr-models/silero_vad.onnx"
+          curl -fL -o whisper.tar.bz2 "$DL/asr-models/sherpa-onnx-whisper-base.en.tar.bz2"
+          tar xf whisper.tar.bz2
+          cp sherpa-onnx-whisper-base.en/base.en-encoder.int8.onnx "$A/"
+          cp sherpa-onnx-whisper-base.en/base.en-decoder.int8.onnx "$A/"
+          cp sherpa-onnx-whisper-base.en/base.en-tokens.txt "$A/"
+          curl -fL -o "$A/speaker.onnx" "$DL/speaker-recongition-models/nemo_en_titanet_small.onnx"
+          ls -la "$A"
+
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon
 
