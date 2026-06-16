@@ -27,11 +27,25 @@ stays on the device (no audio leaves it). This is the closest match to the offli
 desktop tool.
 
 **On-device only — no silent cloud fallback.** The app uses *only* the offline
-engine. If your Chromebook doesn't have offline English installed, it refuses to
-run and points you to Settings instead of quietly streaming audio to Google. The
-APK is small (~11 MB) because it bundles no speech model — the offline model is
-provided by Android itself and downloaded separately via Settings. To prove it's
-local, turn on airplane mode and confirm transcription still works.
+engine. If your device doesn't have offline English installed, it refuses to run
+and points you to Settings instead of quietly streaming audio to Google. The APK
+is small (~11 MB) because it bundles no speech model — the offline model is
+provided by Android itself and downloaded separately via Settings.
+
+**The app has no network access at all.** It declares only the microphone
+permission, and the manifest explicitly *strips* `INTERNET` (and network-state)
+at build time, so the app process physically cannot open a network connection.
+The build pipeline even fails if a future change ever reintroduces a network
+permission — see the "Verify APK has no network permission" step in
+[`.github/workflows/build.yml`](.github/workflows/build.yml). You can confirm
+this yourself: the APK's permission list (e.g. in your phone's App info, or
+`aapt dump permissions`) shows microphone only.
+
+> Note on scope: speech recognition itself runs in Android's *separate*
+> on-device engine (a different process), not inside this app. On-device mode
+> processes audio locally, and this app can't talk to the network — but the
+> definitive end-to-end test is to **turn on airplane mode and confirm
+> transcription still works.** It will.
 
 ### Install the prebuilt APK
 1. Every push to `main` builds a signed APK via GitHub Actions and attaches it to a
