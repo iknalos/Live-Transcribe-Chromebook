@@ -1,21 +1,21 @@
-# Live Transcribe — Chromebook edition
+# Live Transcribe — multi-platform
 
-Real-time, **speaker-tagged** English transcription for Chromebooks. A port of my
-desktop Live Transcribe tool, built for interviewing a small group with **one mic
-passed around**: tap who is about to speak (buttons or number keys `0–4`) as you
-hand the mic over. Consecutive speech from the same speaker merges into one
-paragraph; switching speakers starts a new one.
+Real-time, **speaker-tagged** English transcription, built for interviewing a small
+group with **one mic passed around**: tag who is about to speak (buttons or number
+keys `0–4`) as you hand the mic over. Consecutive speech from the same speaker merges
+into one paragraph; switching speakers starts a new one. The same idea, three ways:
 
-Two versions live in this repo:
-
-| | Folder | Engine | Offline? |
+| Platform | Folder | Engine | Offline? |
 |---|---|---|---|
-| **Android app** (recommended) | [`android/`](android) | Android on-device `SpeechRecognizer` | ✅ once the English language pack is installed |
-| **Chrome web / PWA** | [`web/`](web) | Browser Web Speech API | ❌ Chrome streams audio to Google |
+| **Android** (phone / Chromebook) | [`android/`](android) | On-device `SpeechRecognizer` (Manual) + bundled sherpa-onnx (Auto, voiceprint speaker ID) | ✅ fully on-device, no network permission |
+| **Windows** (desktop) | [`windows/`](windows) | Whisper via RealtimeSTT (Python) | ✅ after first model download |
+| **Web** (Chrome PWA) | [`web/`](web) | Browser Web Speech API | ❌ Chrome streams audio to Google |
 
-Both share the same UX: big color-coded status banner (idle / listening / hearing /
-transcribing / paused), live interim preview, Pause/Resume, Save to a `.txt`, Clear,
-and keyboard shortcuts (`0`–`4` to tag a speaker, `m` for "Me", `space` to pause).
+The **Android** app builds into a downloadable APK via GitHub Actions — grab it from
+the [Releases page](../../releases). The **Windows** app is the original Python
+desktop tool (run `windows/Live Transcribe.bat`). All share the same UX: a big
+color-coded status banner, live preview, Save to `.txt`, Clear, and keyboard
+shortcuts (`0`–`4` to tag a speaker, `m` for "Me", `space` to pause).
 
 ---
 
