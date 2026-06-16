@@ -172,7 +172,10 @@ class SherpaEngine(private val context: Context) {
         if (text.isEmpty()) return
 
         val emb = embed(samples)
-        val speaker = if (emb != null) book.assign(emb) else book.unknownSpeaker()
+        // Only let clips of a reasonable length create a brand-new speaker;
+        // short blips stick with whoever spoke last.
+        val longEnough = samples.size >= (sampleRate * 1.2f).toInt()
+        val speaker = if (emb != null) book.assign(emb, longEnough) else book.unknownSpeaker()
         listener.onText(text, speaker)
     }
 

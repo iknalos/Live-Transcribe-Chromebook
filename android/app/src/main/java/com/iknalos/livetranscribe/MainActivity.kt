@@ -26,6 +26,7 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -83,6 +84,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnModeManual: Button
     private lateinit var btnModeAuto: Button
     private lateinit var btnEnroll: Button
+    private lateinit var sensBar: SeekBar
+    private lateinit var sensLabel: TextView
     private lateinit var speakerRow: LinearLayout
     private lateinit var banner: TextView
     private lateinit var preview: TextView
@@ -93,6 +96,7 @@ class MainActivity : AppCompatActivity() {
 
     private var autoMode = false
     private var engine: SherpaEngine? = null
+    private var autoThreshold = 0.45f      // voice-match cutoff, live-tunable
 
     private var recognizer: SpeechRecognizer? = null
     private var running = false
@@ -118,6 +122,8 @@ class MainActivity : AppCompatActivity() {
         btnModeManual = findViewById(R.id.btnModeManual)
         btnModeAuto = findViewById(R.id.btnModeAuto)
         btnEnroll = findViewById(R.id.btnEnroll)
+        sensBar = findViewById(R.id.sensBar)
+        sensLabel = findViewById(R.id.sensLabel)
         speakerRow = findViewById(R.id.speakerRow)
         banner = findViewById(R.id.banner)
         preview = findViewById(R.id.preview)
@@ -132,6 +138,16 @@ class MainActivity : AppCompatActivity() {
         btnModeManual.setOnClickListener { setMode(false) }
         btnModeAuto.setOnClickListener { setMode(true) }
         btnEnroll.setOnClickListener { promptEnroll() }
+
+        sensBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) {
+                autoThreshold = 0.15f + (p / 100f) * 0.60f   // 0.15 … 0.75
+                sensLabel.text = "Voice match: %.2f".format(autoThreshold)
+                engine?.book?.threshold = autoThreshold      // live update if running
+            }
+            override fun onStartTrackingTouch(sb: SeekBar?) {}
+            override fun onStopTrackingTouch(sb: SeekBar?) {}
+        })
 
         buildSpeakerButtons()
         setMode(false)
@@ -261,6 +277,7 @@ class MainActivity : AppCompatActivity() {
         footer.text = "Auto (offline) — detecting speakers by voice"
         setState("loading")
         val eng = SherpaEngine(this)
+        eng.book.threshold = autoThreshold
         engine = eng
         eng.start(object : SherpaEngine.Listener {
             override fun onText(text: String, speaker: SpeakerBook.Speaker) = runOnUiThread {
