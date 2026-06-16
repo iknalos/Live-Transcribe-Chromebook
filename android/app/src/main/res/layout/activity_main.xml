@@ -51,6 +51,38 @@
             android:text="Save…" />
     </LinearLayout>
 
+    <!-- mode + enroll -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/btnModeManual"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:text="Manual" />
+
+        <Button
+            android:id="@+id/btnModeAuto"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:text="Auto (beta)" />
+
+        <Button
+            android:id="@+id/btnEnroll"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:enabled="false"
+            android:text="Enroll" />
+    </LinearLayout>
+
     <!-- speaker selector -->
     <TextView
         android:layout_width="wrap_content"
