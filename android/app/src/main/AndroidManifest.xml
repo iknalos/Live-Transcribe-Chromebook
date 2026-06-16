@@ -1,10 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
-    <!-- Needed so we can resolve the system speech recognition service when
-         falling back from on-device recognition. -->
+    <!-- Guarantee this app has NO network access. Even if a library tries to
+         merge these in, the manifest merger strips them, so the app process
+         physically cannot open a network connection. Recognition runs in
+         Android's separate on-device engine; this app never touches the net. -->
+    <uses-permission android:name="android.permission.INTERNET" tools:node="remove" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove" />
+
+    <!-- Discover the on-device speech recognition service. -->
     <queries>
         <intent>
             <action android:name="android.speech.RecognitionService" />
